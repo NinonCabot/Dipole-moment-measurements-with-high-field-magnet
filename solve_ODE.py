@@ -5,8 +5,6 @@ from numpy import linalg as LA
 from scipy.integrate import odeint
 
 
-
-
 #Definition of ODE function for polarisation
 def ds(s, t,boost,gamma) :
     # Compute energy and define variables in natural units
@@ -38,10 +36,16 @@ def dpos(pos, t,boost,c):
     return(dpos_dt)
 
 def dp(p, t,boost,c):
+    B = np.array([0, 20, 0]) #T
+    B = np.array([0,1.248*1e14,0])#Mev / Am2
+    E = np.array([0,0,0])
+    c = 299792458 #m/S
+    e = 1.602176634 * 1e-19  # As
     dx = 0
     dy = 0
     dz = 0
     dp_dt = [dx, dy, dz]
+    dp_dt = c * e * (E + c * np.cross(boost,B))
     return(dp_dt)
 
 def plot_histo(plot_momentum_hist=False, plot_beta_hist=False, plot_gamma_hist=False, plot_energy_hist=False, plot_theta_hist=False,theta = None):
@@ -87,7 +91,7 @@ def plot_histo(plot_momentum_hist=False, plot_beta_hist=False, plot_gamma_hist=F
         plt.close()
 
     if plot_theta_hist:
-        save_path = "theta_histogram.png"
+        save_path = "theta_histogram_notnormed.png"
         # Plot theta histogram and save as .png
         fig2 = plt.figure(figsize=(15, 15))
         ax1 = fig2.add_subplot(1, 1, 1)
@@ -96,72 +100,27 @@ def plot_histo(plot_momentum_hist=False, plot_beta_hist=False, plot_gamma_hist=F
         plt.savefig(save_path)
         plt.close()
 
-def main():
-    # Import data from a root file
-    file = uproot.open("DV_Lb_Lcmunu_pKpi_FixedTarget_NoCut_pSet22_MCDT_9.root")
-    tree = file["MCDecayTreeTuple/MCDecayTree"]
+def boost_to_cm(pz_lab):
+    # Constants
+    sqrt_s = 7e6  # Center-of-mass energy [MeV]
+    m_p = 1115.7  # Proton mass in MeV/c^2
 
-    px = tree["Lambda_b0_TRUEP_X"].array(library="np")
-    py = tree["Lambda_b0_TRUEP_Y"].array(library="np")
-    pz = tree["Lambda_b0_TRUEP_Z"].array(library="np")
-    true_tau = tree["Lambda_b0_TRUETAU"].array(library='np') * 1e-7  # s
-    mlambdab = 1115.7  # Mev/c2
-    p_vec = np.stack((px, py, pz), axis=1)  # MeV/c
-    p_tot = np.sqrt(px**2 + py**2 + pz**2)
-    Ec = np.sqrt(p_tot ** 2  + mlambdab ** 2) - mlambdab
-    En = np.sqrt((p_tot)**2 + (mlambdab)**2)  # NU with c=1
-    # E_gauss = np.sqrt((p_tot * c_gauss)**2 + (mlambdab * (c_gauss**2))**2)  # MeV
-    gamma = En / mlambdab
-    gamma_c = 1 + Ec/mlambdab
-    # beta = np.sqrt(1 - 1 / gamma ** 2)
-    # Compute boost factors and initialize boost variable
-    boost = np.stack((px, py, pz), axis=1) / En[:, None]  # 
-    beta = np.sqrt(boost[:, 0]**2 + boost[:, 1]**2 + boost[:, 2]**2)
-    
-    #Compute the initial conditions for all events using the fact that the initial polarisation is perpendicular to the production plane
-    p_tot_s = np.sqrt(px**2 + py**2)
-    s_i = np.stack((px/p_tot_s, py/p_tot_s, np.zeros_like(p_tot)), axis=1)
-    pos_0 = np.zeros_like(s_i)
+    # Compute Lorentz factor
+    gamma = np.sqrt(sqrt_s) / (2 * m_p)
 
-    #Initialisation of a time array used for integration and computation of tau_ for each event
-    tf = gamma * true_tau #s
-    t = np.linspace(0,tf,num = 10) #s
-    sf = np.empty_like(s_i) #[]
-    pos_f = np.empty_like(pos_0) #[m]
-    p_final = np.empty_like(p_vec) #[m]
-    p_vec_normed = p_vec / p_tot[:, np.newaxis]
-    filename = 'test_results_9.txt'
-    with open(filename,'w') as file:
-        for nb in range(len(p_tot)) : 
-            s = odeint(ds, s_i[nb], t[:,nb],args = (np.asarray(boost[nb]), gamma[nb]))
-            sf[nb] = s[-1] 
-            pos_part = odeint(dpos,pos_0[nb],t[:,nb],args =(np.asarray(boost[nb]),1))
-            pos_f[nb] = pos_part[-1]
-            p = odeint(dp, p_vec[nb], t[:,nb], args=(np.asarray(boost[nb]),1))
-            p_final[nb] = p[-1]
-            file.write(f"Event n°{nb} \n")
-            file.write(f"Polarisation vector at t_f : \n")
-            file.write(f"{s[-1]} \n")
-            file.write(f"Position of the particle at t_f: \n {pos_part[-1]} \n")
+    # Compute velocity of center-of-mass frame
+    beta_cm = np.sqrt(1 - 1 / gamma**2)
 
-    theta = np.zeros(len(p_vec))
-    print(len(p_vec))
-    print(theta)
-    norm_i = []
-    norm_f = []
-    p_tmp = []
-    norm_tmp = []
-    p_vec_normed = p_vec / p_tot[:, np.newaxis]
-    p_f_normed = p_final / p_tot[:, np.newaxis]
-    # for n in range(1, len(p_vec),2000):
-    for n in range(len(p_vec)): 
-        p_tmp = np.dot(p_vec_normed[n],p_f_normed[n])
-        norm_i = np.sqrt(p_vec[n,0]**2 +p_vec[n,1]**2 + p_vec[n,2]**2)
-        norm_f = np.sqrt(p_final[n,0]**2 +p_final[n,1]**2 + p_final[n,2]**2)
-        norm_tmp=norm_i*norm_f
-        rat = p_tmp/norm_tmp
-        theta[n] = np.arccos(p_tmp/norm_tmp)
+    # Compute energy in the laboratory frame
+    E_lab = np.sqrt(pz_lab**2 + m_p**2)
 
+    # Compute momentum in the center-of-mass frame
+    pz_cm = gamma * (pz_lab - beta_cm * E_lab)
+
+    return pz_cm
+
+
+def plot_pos_et_s(pos_f,sf):
     fig, axs = plt.subplots(2,3,figsize=(15,10))
     ax0 = axs[0,0]
     ax1 = axs[0,1]
@@ -185,7 +144,117 @@ def main():
     fig.tight_layout()
     plt.savefig("test.png" )
 
-    plot_histo(plot_theta_hist = True,theta = theta)
+def solve(gamma, boost, true_tau,s_i, pos_0, p_vec):
+    #Initialisation of a time array used for integration and computation of tau_ for each event
+    tf = gamma * true_tau #s
+    t = np.linspace(0,tf,num = 10) #s
+    sf = np.empty_like(s_i) #[]
+    pos_f = np.empty_like(pos_0) #[m]
+    p_final = np.empty_like(p_vec) #[m]
+    filename = 'test_results_9.txt'
+    theta = np.zeros(len(p_vec))
+    norm_i = []
+    norm_f = []
+    p_tmp = []
+    norm_tmp = []
+    with open(filename,'w') as file:
+        for nb in range(len(p_vec[:,0])) : 
+            s = odeint(ds, s_i[nb], t[:,nb],args = (np.asarray(boost[nb]), gamma[nb]))
+            sf[nb] = s[-1] 
+            pos_part = odeint(dpos,pos_0[nb],t[:,nb],args =(np.asarray(boost[nb]),1))
+            pos_f[nb] = pos_part[-1]
+            p = odeint(dp, p_vec[nb], t[:,nb], args=(np.asarray(boost[nb]),1))
+            p_final[nb] = p[-1]
+            file.write(f"Event n°{nb} \n")
+            file.write(f"Polarisation vector at t_f : \n")
+            file.write(f"{s[-1]} \n")
+            file.write(f"Position of the particle at t_f: \n {pos_part[-1]} \n")
+
+            p_tmp = np.dot(p_vec[nb],p_final[nb])
+            norm_i = np.sqrt(p_vec[nb,0]**2 +p_vec[nb,1]**2 + p_vec[nb,2]**2)
+            norm_f = np.sqrt(p_final[nb,0]**2 +p_final[nb,1]**2 + p_final[nb,2]**2)
+            norm_tmp=norm_i*norm_f
+            rat = p_tmp/norm_tmp
+            # print (f'ratio = ',rat)
+            theta[nb] = np.arccos(rat)
+            # print(f'theta = ',theta[nb])
+    
+    return sf, pos_f, p_final, theta
+
+def plot_xF(xF,p_tot_s):
+    save_path = "xF_vs_p_tot_s.png"
+    plt.figure(figsize=(15, 15))
+    plt.xscale('log')
+    plt.plot( xF, p_tot_s, 'o', markersize=3)
+    plt.ylabel('p_tot_s')
+    plt.xlabel('xF')
+    plt.title('p_tot_s as a function of xF')
+    plt.grid(True)
+    plt.savefig(save_path)
+    plt.close()
+
+def main(px = None, py = None, pz = None, true_tau = None, pt = None):
+
+    mlambdab = 1115.7  # Mev/c2
+    p_vec = np.stack((px, py, pz), axis=1)  # MeV/c
+    p_tot = np.sqrt(px**2 + py**2 + pz**2)
+    Ec = np.sqrt(p_tot ** 2  + mlambdab ** 2) - mlambdab
+    En = np.sqrt((p_tot)**2 + (mlambdab)**2)  # NU with c=1
+    gamma = En / mlambdab
+    # for comparison
+    #gamma_c = 1 + Ec/mlambdab
+    #beta = np.sqrt(1 - 1 / gamma ** 2)
+
+    # Compute boost factors and initialize boost variable
+    boost = np.stack((px, py, pz), axis=1) / En[:, None]  # 
+    beta = np.sqrt(boost[:, 0]**2 + boost[:, 1]**2 + boost[:, 2]**2)
+    
+    #Compute the initial conditions for all events using the fact that the initial polarisation is perpendicular to the production plane
+    p_tot_s = np.sqrt(px**2 + py**2)
+    s_i = np.stack((-py/p_tot_s, px/p_tot_s, np.zeros_like(p_tot)), axis=1)
+    pos_0 = np.zeros_like(s_i)
+
+    sf, pos_f, p_final, theta = solve(gamma, boost, true_tau,s_i, pos_0, p_vec)
+
+    # plot_pos_et_s(pos_f,sf)
+    # plot_histo(plot_theta_hist = True,theta = theta)
+    # Calculate the magnitude of the momentum vector
+    p_vec_magnitude = np.linalg.norm(p_vec, axis=1)
+
+    # Perform element-wise division
+    p_vec_normed = p_vec / p_vec_magnitude[:, np.newaxis]
+    
+    for n in range(len(p_vec_magnitude)):
+        dot = np.dot(s_i[n],p_vec_normed[n].T)
+    sT = s_i - (dot) * p_vec_normed
+    sT_norm = np.linalg.norm(sT,axis=1)
+    print(sT)
+    #Boost back initial momentum into CM frame
+    pz_cm = boost_to_cm(pz)
+    print(pz)
+
+    sT = pt / p_tot_s #Try with the pT value from the root files 
+    
+    #Calculate delta x distributions 
+    xF = pz_cm / ((7*1e6)/2)
+    
+    #Determine predicted polarisation
+    plot_xF(xF,sT)
+
+    # Plot polarisation distribution as a function of xF
+
+
+
 
 if __name__ == "__main__" : 
-    main()
+    # Import data from a root file
+    file = uproot.open("DV_Lb_Lcmunu_pKpi_FixedTarget_NoCut_pSet22_MCDT_9.root")
+    tree = file["MCDecayTreeTuple/MCDecayTree"]
+
+    px = tree["Lambda_b0_TRUEP_X"].array(library="np")
+    py = tree["Lambda_b0_TRUEP_Y"].array(library="np")
+    pz = tree["Lambda_b0_TRUEP_Z"].array(library="np")
+    true_tau = tree["Lambda_b0_TRUETAU"].array(library='np') * 1e-7  # s
+    pT = tree["Lambda_b0_TRUEPT"].array(library='np')
+    print(pT)
+    main(px = px, py = py, pz = pz, true_tau = true_tau,pt = pT)
